@@ -1,5 +1,5 @@
 // src/routes/intakeRoutes.js
-// Intake endpoints - the dynamic 13-step clinical questionnaire flow.
+// Intake endpoints — the dynamic 13-step clinical questionnaire flow.
 //
 //   GET  /api/intake/questionnaire   - the 13-step questionnaire definition
 //                                      (the frontend renders the flow from this)
@@ -14,6 +14,7 @@ import { allProductsExist } from '../data/catalog.js';
 import { handleIntakeV2 } from '../services/orchestrator.js';
 import { toDashboardView } from '../services/orderService.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { attachPatient } from '../middleware/requireAuth.js';
 
 export const intakeRoutes = Router();
 
@@ -21,7 +22,7 @@ export const intakeRoutes = Router();
  * GET /api/intake/questionnaire
  * Returns the full 13-step questionnaire definition (steps, questions,
  * options, validation rules, and `showIf` branching). The frontend renders
- * the dynamic flow generically from this payload - no flow logic is hard-coded
+ * the dynamic flow generically from this payload — no flow logic is hard-coded
  * in the UI.
  */
 intakeRoutes.get('/intake/questionnaire', (_req, res) => {
@@ -37,8 +38,13 @@ intakeRoutes.get('/intake/questionnaire', (_req, res) => {
  * exist, then hands off to the orchestrator (validate -> build SteadyMD
  * payload -> submit async visit). Intakes that trip a contraindication red
  * flag are recorded and declined without ever reaching a clinician.
+ *
+ * `attachPatient` is a SOFT auth middleware: intake works for guests, but when
+ * a valid patient session is present the resulting order is associated with
+ * that account (order.intake.patientId) so it shows on their dashboard and is
+ * protected by the ownership check in orderRoutes.
  */
-intakeRoutes.post('/intake', async (req, res, next) => {
+intakeRoutes.post('/intake', attachPatient, async (req, res, next) => {
   try {
     const body = req.body || {};
 
@@ -52,8 +58,14 @@ intakeRoutes.post('/intake', async (req, res, next) => {
       throw new AppError('answers object is required', 422);
     }
 
+    // Associate the order with the logged-in patient when one is present.
+    const patient = { ...(body.patient || {}) };
+    if (req.patientId) {
+      patient.patientId = req.patientId;
+    }
+
     const result = await handleIntakeV2({
-      patient: body.patient,
+      patient,
       productIds: body.productIds,
       answers: body.answers,
       program: body.program,
