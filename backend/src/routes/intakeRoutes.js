@@ -15,6 +15,9 @@ import { handleIntakeV2 } from '../services/orchestrator.js';
 import { toDashboardView } from '../services/orderService.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { attachPatient } from '../middleware/requireAuth.js';
+import { capturePaymentMethod } from '../services/stripeService.js';
+import { config } from '../config.js';
+import { logger } from '../lib/logger.js';
 
 export const intakeRoutes = Router();
 
@@ -72,6 +75,44 @@ intakeRoutes.post('/intake', attachPatient, async (req, res, next) => {
     });
 
     const eligible = result.validation.eligible;
+
+    // --- Payment-method capture (NO charge) --------------------------------
+    // BUSINESS RULE: completing intake never charges the patient. For an
+    // eligible intake submitted by a signed-in patient we create a Stripe
+    // SetupIntent so a card can be SAVED now — the actual charge happens only
+    // later, if a clinician approves (handleSteadyMDDecision -> subscription).
+    //
+    // Guests are not charged and have no patient record to attach a Stripe
+    // Customer to, so the SetupIntent is skipped for them; the frontend can
+    // prompt them to create an account before payment-method capture.
+    let payment = null;
+    if (eligible && req.patientId) {
+      try {
+        const capture = await capturePaymentMethod({
+          orderId: result.order.id,
+          patientId: req.patientId,
+        });
+        payment = {
+          // Hand this client secret to Stripe.js/Elements to collect & save the
+          // card. No charge is created by confirming a SetupIntent.
+          setupIntentClientSecret: capture.clientSecret,
+          stripeCustomerId: capture.stripeCustomerId,
+          billingState: capture.billingState,
+          // Publishable key the browser needs to initialise Stripe.js.
+          // TODO(prod): replace the placeholder STRIPE_PUBLISHABLE_KEY.
+          stripePublishableKey: config.stripe.publishableKey,
+          note: 'Card is saved now; you are charged only if a clinician approves treatment.',
+        };
+      } catch (err) {
+        // A payment-setup failure must not block the clinical intake from
+        // being recorded — surface it without failing the whole request.
+        logger.error('SetupIntent creation failed during intake', {
+          orderId: result.order.id,
+          error: err.message,
+        });
+      }
+    }
+
     res.status(201).json({
       message: eligible
         ? 'Intake received and submitted for clinician review'
@@ -81,6 +122,7 @@ intakeRoutes.post('/intake', attachPatient, async (req, res, next) => {
       redFlags: result.validation.redFlags,
       warnings: result.validation.warnings,
       order: toDashboardView(result.order),
+      payment,
     });
   } catch (err) {
     next(err);
