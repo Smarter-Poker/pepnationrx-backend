@@ -38,6 +38,27 @@ export const config = {
   },
 
   databaseUrl: env('DATABASE_URL'),
+
+  // --- Payments (Stripe) ---------------------------------------------------
+  // TODO(prod): there is no real Stripe account yet. All four values below are
+  // placeholders. Obtain them from the Stripe dashboard before go-live:
+  //   secretKey      — the API secret key (sk_live_... / sk_test_...).
+  //   webhookSecret  — the signing secret for the /webhooks/stripe endpoint
+  //                    (whsec_...); used to verify the Stripe-Signature header.
+  //   publishableKey — the publishable key (pk_live_... / pk_test_...); shipped
+  //                    to the browser so Stripe.js/Elements can collect a card.
+  // When `secretKey` is a real `sk_` value the live Stripe SDK engages; until
+  // then the backend uses an in-process mock built to Stripe's documented
+  // shapes (see src/clients/stripeClient.js).
+  stripe: {
+    secretKey: env('STRIPE_SECRET_KEY'),
+    webhookSecret: env('STRIPE_WEBHOOK_SECRET'),
+    publishableKey: env('STRIPE_PUBLISHABLE_KEY'),
+    // Pin the Stripe API version for reproducible behaviour across deploys.
+    // TODO(prod): confirm the current version shown in the Stripe dashboard.
+    apiVersion: env('STRIPE_API_VERSION', '2025-03-31.basil'),
+  },
+  // Back-compat alias — earlier scaffold code referenced config.stripeSecretKey.
   stripeSecretKey: env('STRIPE_SECRET_KEY'),
 
   // --- Authentication ------------------------------------------------------
