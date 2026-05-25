@@ -1,0 +1,18 @@
+{
+  "name": "pepnationrx-backend",
+  "version": "0.1.0",
+  "description": "Scaffolded telehealth MSO backend for PepNationRX — integrates SteadyMD, Empower Pharmacy, and Hallandale Pharmacy with conditional pharmacy routing.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "zod": "^3.23.8"
+  }
+}
