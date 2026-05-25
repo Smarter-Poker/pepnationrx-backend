@@ -32,15 +32,15 @@ vendors.
     |
     |  POST /api/intake   (validate payload)
     v
-  Order(INTAKE_SUBMITTED) --> steadymdClient.submitIntake() --> SteadyMD
+  Order(INTAKE_SUBMITTED) ──► steadymdClient.submitIntake() ──► SteadyMD
     |                                                            |
   Order(CLINICIAN_REVIEW)                          clinician reviews async
     |                                                            |
-    |  POST /webhooks/steadymd  <---------------------------------+
+    |  POST /webhooks/steadymd  ◄────────────────────────────────┘
     v
   decision?
-    +- declined --> Order(DECLINED)
-    +- approved --> Order(APPROVED)
+    ├─ declined ─► Order(DECLINED)
+    └─ approved ─► Order(APPROVED)
                      |
                      |  pharmacyRouter: GLP-1 -> Hallandale, else -> Empower
                      v
@@ -50,16 +50,16 @@ vendors.
                      |
     POST /webhooks/empower | /webhooks/hallandale
                      v
-       Order: COMPOUNDING --> SHIPPED (capture tracking #) --> DELIVERED
+       Order: COMPOUNDING ─► SHIPPED (capture tracking #) ─► DELIVERED
                      |
-       GET /api/orders/:id  <-- patient dashboard reads state + tracking
+       GET /api/orders/:id  ◄── patient dashboard reads state + tracking
 ```
 
 ### Order lifecycle state machine
 
 ```
-DRAFT -> INTAKE_SUBMITTED -> CLINICIAN_REVIEW -> (APPROVED | DECLINED)
-        -> ROUTED_TO_PHARMACY -> COMPOUNDING -> SHIPPED -> DELIVERED
+DRAFT → INTAKE_SUBMITTED → CLINICIAN_REVIEW → (APPROVED | DECLINED)
+        → ROUTED_TO_PHARMACY → COMPOUNDING → SHIPPED → DELIVERED
 
 Plus CANCELLED and ON_HOLD (reachable from any non-terminal state).
 ```
@@ -87,15 +87,107 @@ Rule of thumb: **GLP-1 -> Hallandale, everything else -> Empower.**
 
 ## API surface
 
-| Method | Path                          | Purpose |
-|--------|-------------------------------|---------|
-| GET    | `/api/intake/questionnaire`   | The 13-step questionnaire definition (frontend renders the flow from this) |
-| POST   | `/api/intake`                 | Submit a completed 13-step intake; creates an order |
-| GET    | `/api/orders/:id`             | Dashboard read: status + tracking |
-| POST   | `/webhooks/steadymd`          | Clinician decision (approved/declined) |
-| POST   | `/webhooks/empower`           | Empower fulfillment update + tracking |
-| POST   | `/webhooks/hallandale`        | Hallandale fulfillment update + tracking |
-| GET    | `/health`                     | Liveness + scaffold-mode flag |
+| Method | Path                          | Auth | Purpose |
+|--------|-------------------------------|------|---------|
+| POST   | `/api/auth/register`          | —    | Create a patient account; sends an email-verification link |
+| POST   | `/api/auth/login`             | —    | Verify password; issue a session cookie |
+| POST   | `/api/auth/logout`            | —    | Destroy the session |
+| GET    | `/api/auth/me`                | yes  | Current authenticated patient |
+| POST   | `/api/auth/verify-email`      | —    | Confirm an email-verification token |
+| POST   | `/api/auth/password/forgot`   | —    | Request a password-reset email |
+| POST   | `/api/auth/password/reset`    | —    | Confirm a reset token + set a new password |
+| GET    | `/api/intake/questionnaire`   | —    | The 13-step questionnaire definition (frontend renders the flow from this) |
+| POST   | `/api/intake`                 | soft | Submit a completed 13-step intake; creates an order (associated with the patient when signed in) |
+| GET    | `/api/orders/:id`             | yes  | Dashboard read: status + tracking (owner-only) |
+| POST   | `/webhooks/steadymd`          | —    | Clinician decision (approved/declined) |
+| POST   | `/webhooks/empower`           | —    | Empower fulfillment update + tracking |
+| POST   | `/webhooks/hallandale`        | —    | Hallandale fulfillment update + tracking |
+| GET    | `/health`                     | —    | Liveness + scaffold-mode flag |
+
+---
+
+## Authentication
+
+The patient account / auth layer (`src/services/patientService.js`,
+`src/services/authService.js`, `src/routes/authRoutes.js`,
+`src/middleware/requireAuth.js`, `src/lib/authAudit.js`) was built
+**research-first** against current (2026) OWASP, NIST 800-63B, and HIPAA
+guidance — see the design notes below.
+
+### Design decisions (and why)
+
+**Password hashing — argon2id, bcrypt fallback.**
+OWASP's Password Storage Cheat Sheet names **argon2id** the gold standard:
+memory-hard, resistant to GPU cracking and side-channel timing analysis. We use
+the OWASP minimum parameters (19 MiB memory, 2 iterations, parallelism 1).
+`bcrypt` (cost factor 12) is wired as a documented fallback for environments
+without the argon2 native binding. The hash string is self-describing, so
+`verifyPassword()` routes to the right algorithm automatically — which also
+makes a future re-hash-on-login migration trivial.
+*Scaffold note:* if neither native module is installed the layer degrades to a
+Node `scrypt` fallback so the demo still runs; **install `argon2` before
+production** (`npm install`).
+
+**Sessions — signed httpOnly cookie over a server-side session, NOT a JWT.**
+OWASP and Curity both caution that JWTs were not designed for session
+management and using them as one can *lower* security. A patient portal touching
+ePHI needs three things a stateless JWT cannot cleanly give: **immediate
+revocation** (logout, password reset, lockout), a **true sliding inactivity
+timeout**, and **zero PHI in anything handed to the client**. So we keep a
+server-side session record (random id) and deliver only a signed session id in
+a cookie. The cookie carries no patient data at all.
+
+**Secure cookie flags.** The session cookie is `httpOnly` (not readable by JS —
+mitigates XSS token theft), `Secure` (HTTPS-only; on in `NODE_ENV=production`),
+and `SameSite=Strict` (mitigates CSRF). The cookie value is `sessionId.HMAC`,
+so a tampered id is rejected by signature check before any store lookup.
+
+**HIPAA considerations.**
+- *Auditable auth events* — every register / login / login-failure / lockout /
+  logout / password-reset / email-verify event is written to an audit trail
+  (`src/lib/authAudit.js`) with who / when / from where. No PHI or secrets are
+  ever logged.
+- *Automatic logoff* — sessions enforce a **30-minute sliding inactivity
+  timeout** and a **12-hour absolute cap**; both are configurable.
+- *No PHI in tokens* — session cookies, verification tokens, and reset tokens
+  contain only opaque random values.
+
+**Email verification & password reset.** Tokens are cryptographically random
+(32 bytes). The **raw** token is emailed; only its **SHA-256 hash** is stored.
+Tokens are **single-use** (cleared on success) and **short-lived** (reset link
+15 min, verification link 24 h). A new reset request invalidates the previous
+token, and a completed reset **revokes every active session** for that patient.
+
+**Brute-force / rate-limit protection.**
+- *Per-account lockout* — 5 failed logins locks the account for 15 minutes.
+- *Per-IP rate limit* — 20 login attempts per IP per 15-minute window (429).
+- *No user enumeration* — register, login, and forgot-password return the same
+  generic message whether or not the email exists, and login runs a decoy hash
+  verify on unknown accounts so response timing does not leak existence.
+
+### Production TODOs
+
+Every secret / DB / email dependency is marked `// TODO(prod): ...`. Before
+real patients:
+- **`SESSION_COOKIE_SECRET`** — a long random value from a secrets manager (not
+  the placeholder, not committed).
+- **Persistence** — `patientService` and the session store are in-memory
+  `Map`s; replace with a HIPAA-eligible DB (and a shared session store such as
+  Redis) covered by a signed BAA.
+- **Email** — `sendEmailStub()` only logs; integrate a HIPAA-eligible
+  transactional email provider under a BAA.
+- **`argon2`** — install the native module so hashing is not on the scrypt
+  fallback.
+
+### Try it
+
+```bash
+npm run test:auth   # boots the app, runs register -> login -> protected
+                    # route -> logout end to end, plus a rejected
+                    # bad-password case, the unauthenticated 401, the
+                    # no-enumeration check, and the password-reset flow.
+                    # `npm test` runs the intake suite + this auth suite.
+```
 
 ---
 
@@ -233,16 +325,15 @@ npm start          # or: npm run dev   (watch mode)
 Then exercise the flow:
 
 ```bash
-# Submit an intake (13-step flow: patient + productIds + answers map)
+# Submit an intake
 curl -X POST localhost:3000/api/intake -H 'Content-Type: application/json' -d '{
   "patient": { "firstName":"Jane","lastName":"Doe","dateOfBirth":"1990-01-01",
-               "email":"jane@example.com","phone":"5550001111" },
+               "email":"jane@example.com","phone":"5550001111","sex":"female" },
+  "stateOfResidence": "FL",
   "productIds": ["glp1-semaglutide"],
-  "answers": { "sex_at_birth":"female", "program":"weight_management" }
+  "questionnaire": [{ "questionId":"q1","answer":"no" }],
+  "consent": { "telehealthConsent": true, "compoundedMedConsent": true }
 }'
-
-# Fetch the questionnaire definition the frontend renders
-curl localhost:3000/api/intake/questionnaire
 
 # Simulate the SteadyMD approval webhook (use the orderId returned above)
 curl -X POST localhost:3000/webhooks/steadymd -H 'Content-Type: application/json' \
@@ -262,7 +353,9 @@ curl localhost:3000/api/orders/<ORDER_ID>
 
 **Real (works today):**
 - Express server, routing, JSON parsing, error handling
-- Dynamic 13-step intake questionnaire + branch-aware validation + red-flag screening
+- Patient account / authentication layer (register, login, sessions, password
+  reset, route protection) — in-memory stores, marked TODO(prod)
+- Intake validation (zod schema)
 - Product catalog + conditional pharmacy router
 - Order model + lifecycle state machine with valid-transition enforcement
 - Orchestration wiring across intake -> SteadyMD -> pharmacy -> dashboard
@@ -273,16 +366,19 @@ curl localhost:3000/api/orders/<ORDER_ID>
   `hallandaleClient` log a `STUB:` line and return placeholder responses
   instead of calling real APIs. Real `fetch()` code is commented in place.
 - **Endpoint paths & payload shapes** — placeholders; real specs unknown
-  until onboarding. Marked `TODO(onboarding)` / `TODO(steadymd-onboarding)`.
-- **Auth schemes** — confirm per vendor (SteadyMD docs indicate `Token` prefix).
+  until onboarding. Marked `TODO(onboarding)`.
+- **Auth schemes** — Bearer tokens assumed; confirm per vendor.
 - **Webhook signature verification** — `verifySignature()` is a stub; real
   HMAC/timing-safe verification must replace it before production.
-- **Persistence** — `orderService` uses an in-memory `Map`. Replace with a
-  real database (`DATABASE_URL`).
+- **Persistence** — `orderService` and `patientService` use in-memory `Map`s,
+  and the session store is in-memory. Replace with a HIPAA-eligible database
+  (`DATABASE_URL`) and a shared session store.
+- **Email** — verification / password-reset email send is stubbed
+  (`sendEmailStub` logs only); integrate a HIPAA-eligible email provider.
 - **Payments** — `STRIPE_SECRET_KEY` is wired into config but not yet used.
 
-Search the codebase for `TODO(onboarding)` and `TODO(steadymd-onboarding)` to
-find every reconciliation point.
+Search the codebase for `TODO(onboarding)` and `TODO(prod)` to find every
+reconciliation point.
 
 ---
 
@@ -308,38 +404,45 @@ Do not point this scaffold at real patients until those controls are live.
 
 ```
 backend/
-|-- package.json
-|-- .env.example
-|-- .gitignore
-|-- README.md
-|-- src/
-|   |-- server.js              Express app + bootstrap
-|   |-- config.js              env loading + validation
-|   |-- lib/
-|   |   `-- logger.js          tiny structured logger
-|   |-- data/
-|   |   `-- catalog.js         product catalog + routing metadata
-|   |-- schema/
-|   |   `-- intake.schema.js   zod outer-envelope schema (legacy)
-|   |-- intake/
-|   |   |-- questionnaire.js   dynamic 13-step clinical flow definition
-|   |   |-- conditions.js      declarative showIf/red-flag evaluator
-|   |   |-- validator.js       branch-aware answer validation + red-flag screen
-|   |   `-- steadymdPayload.js maps a validated intake -> SteadyMD async visit
-|   |-- services/
-|   |   |-- pharmacyRouter.js  GLP-1 -> Hallandale, else -> Empower
-|   |   |-- orderService.js    order model + state machine (in-memory)
-|   |   `-- orchestrator.js    end-to-end flow wiring (handleIntakeV2)
-|   |-- clients/
-|   |   |-- steadymdClient.js  SteadyMD clinical API (stubbed)
-|   |   |-- empowerClient.js   Empower Pharmacy API (stubbed)
-|   |   `-- hallandaleClient.js Hallandale / LifeFile API (stubbed)
-|   |-- routes/
-|   |   |-- intakeRoutes.js    GET /api/intake/questionnaire, POST /api/intake
-|   |   |-- webhookRoutes.js   POST /webhooks/{steadymd,empower,hallandale}
-|   |   `-- orderRoutes.js     GET /api/orders/:id
-|   `-- middleware/
-|       `-- errorHandler.js    central error handler + AppError
-`-- scripts/
-    `-- test-intake.js         runnable 13-step intake + SteadyMD payload demo
+├── package.json
+├── .env.example
+├── .gitignore
+├── README.md
+└── src/
+    ├── server.js              Express app + bootstrap
+    ├── config.js              env loading + validation
+    ├── lib/
+    │   ├── logger.js          tiny structured logger
+    │   └── authAudit.js       HIPAA auth audit trail
+    ├── data/
+    │   └── catalog.js         product catalog + routing metadata
+    ├── schema/
+    │   └── intake.schema.js   zod outer-envelope schema (legacy)
+    ├── intake/
+    │   ├── questionnaire.js   dynamic 13-step clinical flow definition
+    │   ├── conditions.js      declarative showIf/red-flag evaluator
+    │   ├── validator.js       branch-aware answer validation + red-flag screen
+    │   └── steadymdPayload.js maps a validated intake -> SteadyMD async visit
+    ├── services/
+    │   ├── pharmacyRouter.js  GLP-1 -> Hallandale, else -> Empower
+    │   ├── orderService.js    order model + state machine (in-memory)
+    │   ├── patientService.js  patient account model + store (in-memory)
+    │   ├── authService.js     password hashing, sessions, tokens, lockout
+    │   └── orchestrator.js    end-to-end flow wiring
+    ├── clients/
+    │   ├── steadymdClient.js  SteadyMD clinical API (stubbed)
+    │   ├── empowerClient.js   Empower Pharmacy API (stubbed)
+    │   └── hallandaleClient.js Hallandale / LifeFile API (stubbed)
+    ├── routes/
+    │   ├── authRoutes.js      POST /api/auth/{register,login,logout,...}
+    │   ├── intakeRoutes.js    POST /api/intake
+    │   ├── webhookRoutes.js   POST /webhooks/{steadymd,empower,hallandale}
+    │   └── orderRoutes.js     GET /api/orders/:id (protected)
+    └── middleware/
+        ├── errorHandler.js    central error handler + AppError
+        └── requireAuth.js     session-cookie auth guard (+ soft attachPatient)
+
+scripts/
+├── test-intake.js            runnable 13-step intake + SteadyMD payload demo
+└── test-auth.js              runnable register -> login -> protected -> logout demo
 ```
