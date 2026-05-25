@@ -9,13 +9,18 @@ import { authRoutes } from './routes/authRoutes.js';
 import { intakeRoutes } from './routes/intakeRoutes.js';
 import { orderRoutes } from './routes/orderRoutes.js';
 import { webhookRoutes } from './routes/webhookRoutes.js';
+import { stripeWebhookRoutes } from './routes/stripeWebhookRoutes.js';
 
 const app = express();
 
-// Parse JSON bodies.
-// TODO(onboarding): webhook signature verification needs the RAW body.
-// When real HMAC checks are added, capture req.rawBody via the verify hook:
-//   express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } })
+// --- Stripe webhook — MUST be mounted BEFORE express.json() ----------------
+// Stripe signature verification requires the UNMODIFIED raw request body
+// (https://docs.stripe.com/webhooks). stripeWebhookRoutes attaches its own
+// express.raw() parser to POST /webhooks/stripe, so it has to see the request
+// before the global JSON body-parser consumes the stream.
+app.use('/webhooks', stripeWebhookRoutes);
+
+// Parse JSON bodies for every other route.
 app.use(express.json({ limit: '256kb' }));
 
 // Health check.
