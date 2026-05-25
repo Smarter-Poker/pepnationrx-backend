@@ -102,6 +102,7 @@ Rule of thumb: **GLP-1 -> Hallandale, everything else -> Empower.**
 | POST   | `/webhooks/steadymd`          | —    | Clinician decision (approved/declined) |
 | POST   | `/webhooks/empower`           | —    | Empower fulfillment update + tracking |
 | POST   | `/webhooks/hallandale`        | —    | Hallandale fulfillment update + tracking |
+| POST   | `/webhooks/stripe`            | sig  | Stripe billing events (`invoice.paid`, `invoice.payment_failed`); Stripe-Signature verified |
 | GET    | `/health`                     | —    | Liveness + scaffold-mode flag |
 
 ---
@@ -187,6 +188,87 @@ npm run test:auth   # boots the app, runs register -> login -> protected
                     # bad-password case, the unauthenticated 401, the
                     # no-enumeration check, and the password-reset flow.
                     # `npm test` runs the intake suite + this auth suite.
+```
+
+---
+
+## Payments (Stripe)
+
+PepNationRX uses a **capture-now / charge-on-approval** billing model, built
+research-first against current (2026) Stripe docs.
+
+### The business rule
+
+> A patient completes intake and is **NOT charged**. Billing begins **only when
+> a clinician APPROVES** the treatment — at that point a recurring subscription
+> for the chosen plan starts. If the clinician **declines**, the patient is
+> **never charged**.
+
+### How that maps to Stripe primitives (and why)
+
+| Step | Stripe primitive | Why |
+|------|------------------|-----|
+| Patient submits intake / checks out | **SetupIntent** + **Customer** | A SetupIntent ([docs](https://docs.stripe.com/api/setup_intents)) *saves a card for future payments and creates NO charge*. We create-or-get a Stripe **Customer** linked to the patient record, then a SetupIntent with `usage: 'off_session'` so the saved card can be charged later when the patient is not present. |
+| Clinician **approves** | **Subscription** | On the `APPROVED` transition we create a recurring **Subscription** ([docs](https://docs.stripe.com/api/subscriptions/create)) against the saved payment method. **This is the first time money moves.** |
+| Clinician **declines** | *(nothing)* | No Subscription, no charge — the order is marked `NOT_BILLABLE`. |
+| Recurring billing | **Webhooks** | `invoice.paid` / `invoice.payment_failed` ([docs](https://docs.stripe.com/billing/subscriptions/webhooks)) update billing state. The endpoint verifies the `Stripe-Signature` header ([docs](https://docs.stripe.com/webhooks)). |
+
+Every Stripe `POST` is sent with an **idempotency key**
+([docs](https://docs.stripe.com/api/idempotent_requests)) derived from a stable
+id (`customer-<patientId>`, `setupintent-<orderId>`, `subscription-<orderId>`)
+so a retry never creates duplicate Customers, SetupIntents, or Subscriptions.
+
+### Where it lives
+
+```
+src/clients/stripeClient.js       Stripe SDK wrapper. Live SDK when a real sk_
+                                  key is set; otherwise an in-process MOCK
+                                  built to Stripe's documented shapes.
+src/services/stripeService.js     Billing business layer — ensureStripeCustomer,
+                                  capturePaymentMethod (SetupIntent),
+                                  startSubscriptionOnApproval, markNotBillable,
+                                  invoice.paid / payment_failed handlers.
+src/data/billingPlans.js          Maps catalog categories -> Stripe Price IDs.
+src/routes/stripeWebhookRoutes.js POST /webhooks/stripe (raw-body + signature).
+```
+
+Wiring: `POST /api/intake` (signed-in patient) -> `capturePaymentMethod()`
+creates a SetupIntent. The orchestrator's `handleSteadyMDDecision()` calls
+`startSubscriptionOnApproval()` on `APPROVED` and `markNotBillable()` on
+`DECLINED` — billing is driven entirely off the existing order state machine.
+
+### Scaffold mode — there is no real Stripe account yet
+
+The integration cannot hit the real Stripe API (no account, no keys). When
+`STRIPE_SECRET_KEY` is a placeholder, `stripeClient.js` resolves to an
+**in-process mock** that mirrors Stripe's documented object shapes — no network
+calls. Supplying a real `sk_` key engages the live Stripe SDK with **no code
+change**.
+
+### Production TODOs (`TODO(prod)`)
+
+Search the codebase for `TODO(prod)`. The account-dependent items are:
+
+- **`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PUBLISHABLE_KEY`** —
+  placeholders in `.env.example`; copy real values from the Stripe dashboard.
+- **`STRIPE_API_VERSION`** — confirm the current pinned version.
+- **Stripe Price IDs** — `src/data/billingPlans.js` uses `price_PLACEHOLDER_*`
+  values; create the real Products + recurring Prices in Stripe.
+- **`npm install stripe`** — the dependency is declared in `package.json`;
+  install it so live mode can load the SDK.
+- **Persistence** — the billing store is an in-memory `Map`; replace with the
+  HIPAA-eligible DB (Stripe itself is the system of record for card data — no
+  card numbers ever touch this server).
+
+### Try it
+
+```bash
+npm run test:stripe   # offline end-to-end proof against the Stripe mock:
+                      #  - intake/checkout -> SetupIntent created, NO charge
+                      #  - order APPROVED  -> Subscription created
+                      #  - order DECLINED  -> NO subscription, NO charge
+                      #  - idempotency, signed-webhook verification
+                      # `npm test` runs the intake + auth + Stripe suites.
 ```
 
 ---
@@ -375,7 +457,9 @@ curl localhost:3000/api/orders/<ORDER_ID>
   (`DATABASE_URL`) and a shared session store.
 - **Email** — verification / password-reset email send is stubbed
   (`sendEmailStub` logs only); integrate a HIPAA-eligible email provider.
-- **Payments** — `STRIPE_SECRET_KEY` is wired into config but not yet used.
+- **Payments** — fully wired (capture-now / charge-on-approval; see the
+  **Payments (Stripe)** section). Runs against an in-process Stripe mock until
+  a real `STRIPE_SECRET_KEY` is supplied — no real Stripe account exists yet.
 
 Search the codebase for `TODO(onboarding)` and `TODO(prod)` to find every
 reconciliation point.
@@ -415,7 +499,8 @@ backend/
     │   ├── logger.js          tiny structured logger
     │   └── authAudit.js       HIPAA auth audit trail
     ├── data/
-    │   └── catalog.js         product catalog + routing metadata
+    │   ├── catalog.js         product catalog + routing metadata
+    │   └── billingPlans.js    catalog category -> Stripe Price ID mapping
     ├── schema/
     │   └── intake.schema.js   zod outer-envelope schema (legacy)
     ├── intake/
@@ -428,15 +513,18 @@ backend/
     │   ├── orderService.js    order model + state machine (in-memory)
     │   ├── patientService.js  patient account model + store (in-memory)
     │   ├── authService.js     password hashing, sessions, tokens, lockout
+    │   ├── stripeService.js   billing — SetupIntent capture + charge-on-approval
     │   └── orchestrator.js    end-to-end flow wiring
     ├── clients/
     │   ├── steadymdClient.js  SteadyMD clinical API (stubbed)
     │   ├── empowerClient.js   Empower Pharmacy API (stubbed)
-    │   └── hallandaleClient.js Hallandale / LifeFile API (stubbed)
+    │   ├── hallandaleClient.js Hallandale / LifeFile API (stubbed)
+    │   └── stripeClient.js    Stripe SDK wrapper (live SDK or offline mock)
     ├── routes/
     │   ├── authRoutes.js      POST /api/auth/{register,login,logout,...}
     │   ├── intakeRoutes.js    POST /api/intake
     │   ├── webhookRoutes.js   POST /webhooks/{steadymd,empower,hallandale}
+    │   ├── stripeWebhookRoutes.js POST /webhooks/stripe (raw body + signature)
     │   └── orderRoutes.js     GET /api/orders/:id (protected)
     └── middleware/
         ├── errorHandler.js    central error handler + AppError
@@ -444,5 +532,6 @@ backend/
 
 scripts/
 ├── test-intake.js            runnable 13-step intake + SteadyMD payload demo
-└── test-auth.js              runnable register -> login -> protected -> logout demo
+├── test-auth.js              runnable register -> login -> protected -> logout demo
+└── test-stripe.js            runnable capture-now / charge-on-approval demo
 ```
