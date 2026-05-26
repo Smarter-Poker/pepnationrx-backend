@@ -12,7 +12,7 @@
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 
-// TODO(onboarding): reconcile with real SteadyMD API spec - confirm the
+// TODO(onboarding): reconcile with real SteadyMD API spec — confirm the
 // actual case-submission path. Placeholder path used until docs arrive.
 const SUBMIT_PATH = '/v1/cases';
 
@@ -23,7 +23,7 @@ const SUBMIT_PATH = '/v1/cases';
  * @returns {Promise<{ caseId: string, status: string }>}
  */
 export async function submitIntake(order) {
-  // TODO(onboarding): reconcile with real SteadyMD API spec - request body
+  // TODO(onboarding): reconcile with real SteadyMD API spec — request body
   // shape is a placeholder mapping of our intake to SteadyMD's case model.
   const requestBody = {
     externalOrderId: order.id,
@@ -37,7 +37,7 @@ export async function submitIntake(order) {
   const url = `${config.steadymd.baseUrl}${SUBMIT_PATH}`;
 
   // --- Stubbed network call ------------------------------------------------
-  // TODO(onboarding): reconcile with real SteadyMD API spec - replace this
+  // TODO(onboarding): reconcile with real SteadyMD API spec — replace this
   // stub with a real fetch() once base URL + auth scheme are confirmed.
   //
   //   const res = await fetch(url, {
@@ -56,7 +56,7 @@ export async function submitIntake(order) {
   logger.info('STUB: SteadyMD submitIntake', { url, orderId: order.id });
   void requestBody; // referenced for shape documentation; unused in stub
 
-  // Placeholder response shape - mirrors the described "case created, pending
+  // Placeholder response shape — mirrors the described "case created, pending
   // asynchronous clinician review" behavior.
   return {
     caseId: `steadymd-stub-${order.id}`,
@@ -64,7 +64,7 @@ export async function submitIntake(order) {
   };
 }
 
-// TODO(steadymd-onboarding): reconcile with real API docs - SteadyMD's public
+// TODO(steadymd-onboarding): reconcile with real API docs — SteadyMD's public
 // docs split submission into EMR endpoints (create the Episode of Care +
 // Intake Questionnaire/Observations/Files) followed by a Consult endpoint to
 // request the async clinician review. Real paths are gated behind the partner
@@ -91,7 +91,7 @@ export async function submitAsyncVisit(payload) {
   const consultUrl = `${config.steadymd.baseUrl}${CONSULT_PATH}`;
 
   // --- Stubbed two-step network call --------------------------------------
-  // TODO(steadymd-onboarding): reconcile with real API docs - replace with
+  // TODO(steadymd-onboarding): reconcile with real API docs — replace with
   // real fetch() calls once base URL, auth, and paths are confirmed.
   //
   //   const emrRes = await fetch(emrUrl, {

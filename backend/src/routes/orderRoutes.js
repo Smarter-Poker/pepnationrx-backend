@@ -5,11 +5,31 @@
 // session is required (requireAuth). The handler also enforces ownership so a
 // logged-in patient cannot read another patient's order.
 import { Router } from 'express';
-import { getOrder, toDashboardView } from '../services/orderService.js';
+import {
+  getOrder,
+  toDashboardView,
+  listOrdersByPatient,
+} from '../services/orderService.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { AppError } from '../middleware/errorHandler.js';
 
 export const orderRoutes = Router();
+
+/**
+ * GET /api/orders/me  (requires an authenticated patient session)
+ * Returns every order belonging to the logged-in patient, newest first.
+ * Powers the patient dashboard order list.
+ * NOTE: declared BEFORE /orders/:id so Express does not parse "me" as an
+ * order id.
+ */
+orderRoutes.get('/orders/me', requireAuth, (req, res, next) => {
+  try {
+    const orders = listOrdersByPatient(req.patientId);
+    res.json({ orders });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /api/orders/:id   (requires an authenticated patient session)

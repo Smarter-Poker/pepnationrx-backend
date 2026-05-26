@@ -6,13 +6,13 @@
 // RESEARCH BASIS (https://docs.steadymd.com/)
 // ---------------------------------------------------------------------------
 // SteadyMD's public docs describe the Platform/Partner API as two sections:
-//   * EMR endpoints     - send patient + chart info: an Episode of Care, an
+//   * EMR endpoints     — send patient + chart info: an Episode of Care, an
 //                         Intake Questionnaire (the questionnaire, its
 //                         potential answers, and the patient's responses),
 //                         Intake Observations (structured clinical values),
 //                         Intake Files (ID-verification / supporting docs),
 //                         and a Preferred Pharmacy.
-//   * Consult endpoints - request clinician time. For async care a partner
+//   * Consult endpoints — request clinician time. For async care a partner
 //                         creates a Consult with a `consult_type`, a Reason
 //                         for Visit, the patient's location (State), and a
 //                         link to the Episode of Care.
@@ -21,7 +21,7 @@
 // via Platform Events (AWS SNS -> SQS/HTTPS; events carry a GUID, no PHI).
 //
 // The exact JSON field names and the per-program `consult_type` strings are
-// NOT in the public docs - the API Reference and the OpenAPI schema
+// NOT in the public docs — the API Reference and the OpenAPI schema
 // (steadymd-partner-api-schema.json) sit behind a partner login, and SteadyMD
 // assigns consult-type values per program after the workflow is defined.
 //
@@ -38,7 +38,7 @@
 import { STEPS, PROGRAM } from './questionnaire.js';
 import { isStepVisible, isQuestionVisible, computeBmi, ageFromDob } from './conditions.js';
 
-// TODO(steadymd-onboarding): reconcile with real API docs - these consult_type
+// TODO(steadymd-onboarding): reconcile with real API docs — these consult_type
 // strings are placeholders. SteadyMD assigns the real values per program once
 // the clinical workflow is defined. All are async-review workflows.
 export const CONSULT_TYPE = Object.freeze({
@@ -50,7 +50,7 @@ export const CONSULT_TYPE = Object.freeze({
   [PROGRAM.LONGEVITY]: 'async_longevity',
 });
 
-// TODO(steadymd-onboarding): reconcile with real API docs - "Reason for Visit"
+// TODO(steadymd-onboarding): reconcile with real API docs — "Reason for Visit"
 // is a documented field but its allowed value list is program-specific and
 // configured by SteadyMD.
 const REASON_FOR_VISIT = Object.freeze({
@@ -63,7 +63,7 @@ const REASON_FOR_VISIT = Object.freeze({
 });
 
 /**
- * Build the EMR "Intake Questionnaire" object - the questionnaire structure,
+ * Build the EMR "Intake Questionnaire" object — the questionnaire structure,
  * potential answers, and the patient's responses, exactly as SteadyMD's docs
  * describe it. Only VISIBLE (branch-active) questions are included so the
  * clinician sees precisely what the patient was asked.
@@ -77,7 +77,7 @@ function buildIntakeQuestionnaire(answers, context) {
       const raw = answers[question.id];
       if (raw === undefined) continue;
       items.push({
-        // TODO(steadymd-onboarding): reconcile with real API docs - confirm
+        // TODO(steadymd-onboarding): reconcile with real API docs — confirm
         // the field names SteadyMD expects for each questionnaire item.
         questionId: question.id,
         stepId: step.id,
@@ -98,14 +98,14 @@ function buildIntakeQuestionnaire(answers, context) {
 }
 
 /**
- * Build "Intake Observations" - the structured clinical values SteadyMD needs
+ * Build "Intake Observations" — the structured clinical values SteadyMD needs
  * to deliver care safely (documented as a distinct concept from the free-form
  * questionnaire). We surface the high-value structured vitals here.
  */
 function buildIntakeObservations(answers) {
   const bmi = computeBmi(answers.height_inches, answers.weight_lbs);
   const observations = [];
-  // TODO(steadymd-onboarding): reconcile with real API docs - confirm the
+  // TODO(steadymd-onboarding): reconcile with real API docs — confirm the
   // observation `code` vocabulary (LOINC? a SteadyMD enum?) and value units.
   if (answers.height_inches !== undefined) {
     observations.push({ code: 'height_in', value: answers.height_inches, unit: 'in' });
@@ -134,7 +134,7 @@ function buildIntakeFiles(answers, context) {
       const ref = answers[question.id];
       if (!ref) continue;
       files.push({
-        // TODO(steadymd-onboarding): reconcile with real API docs - confirm
+        // TODO(steadymd-onboarding): reconcile with real API docs — confirm
         // how file refs are passed (pre-signed upload? multipart? a file id
         // returned by an upload endpoint?) and the `purpose` vocabulary.
         questionId: question.id,
@@ -164,7 +164,7 @@ export function buildSteadyMDPayload({ patient, program, answers, externalOrderI
   const pt = patient || {};
 
   // --- Patient demographics ------------------------------------------------
-  // TODO(steadymd-onboarding): reconcile with real API docs - confirm the
+  // TODO(steadymd-onboarding): reconcile with real API docs — confirm the
   // EMR "Patient" object field names (camelCase vs snake_case, required set).
   const patientObject = {
     externalPatientId: pt.externalPatientId || externalOrderId || null,
@@ -179,7 +179,7 @@ export function buildSteadyMDPayload({ patient, program, answers, externalOrderI
       line1: answers.shipping_address_line1 || null,
       line2: answers.shipping_address_line2 || null,
       city: answers.shipping_city || null,
-      // State of care drives clinician licensing - see Key Terms ("Patient's
+      // State of care drives clinician licensing — see Key Terms ("Patient's
       // Location (State)").
       state: answers.state_of_care || null,
       postalCode: answers.shipping_zip || null,
@@ -189,13 +189,13 @@ export function buildSteadyMDPayload({ patient, program, answers, externalOrderI
 
   // --- EMR sub-payloads ----------------------------------------------------
   const episodeOfCare = {
-    // TODO(steadymd-onboarding): reconcile with real API docs - an Episode of
+    // TODO(steadymd-onboarding): reconcile with real API docs — an Episode of
     // Care groups the intake, observations, files, pharmacy, and consult.
     externalEpisodeId: externalOrderId || null,
     program,
     patient: patientObject,
     preferredPharmacy: {
-      // TODO(steadymd-onboarding): reconcile with real API docs - SteadyMD has
+      // TODO(steadymd-onboarding): reconcile with real API docs — SteadyMD has
       // a documented Preferred Pharmacy endpoint + Pharmacy Search. PepNation's
       // routing (GLP-1 -> Hallandale, else -> Empower) is applied AFTER the
       // clinician decision, so this is left null for the partner workflow.
@@ -209,15 +209,15 @@ export function buildSteadyMDPayload({ patient, program, answers, externalOrderI
 
   // --- Consult request -----------------------------------------------------
   const consult = {
-    // TODO(steadymd-onboarding): reconcile with real API docs - `consultType`
+    // TODO(steadymd-onboarding): reconcile with real API docs — `consultType`
     // and `reasonForVisit` are documented Consult fields; the VALUES are
     // assigned by SteadyMD per program (see CONSULT_TYPE above).
     consultType: CONSULT_TYPE[program] || null,
     modality: 'async', // documented modality: async, no direct communication
     reasonForVisit: REASON_FOR_VISIT[program] || null,
-    // Patient's location at time of visit - documented Consult field.
+    // Patient's location at time of visit — documented Consult field.
     patientStateOfCare: answers.state_of_care || null,
-    // Link to the Episode of Care - documented Consult field.
+    // Link to the Episode of Care — documented Consult field.
     externalEpisodeId: externalOrderId || null,
   };
 
@@ -236,7 +236,7 @@ export function buildSteadyMDPayload({ patient, program, answers, externalOrderI
   // The existing steadymdClient.submitIntake() stub posts a single flat case
   // object. Until that client is migrated to the EMR+Consult split, we also
   // expose this flattened view so nothing breaks.
-  // TODO(steadymd-onboarding): reconcile with real API docs - then delete this
+  // TODO(steadymd-onboarding): reconcile with real API docs — then delete this
   // legacy shape and submit `episodeOfCare` + `consult` directly.
   const legacyCase = {
     externalOrderId: externalOrderId || null,

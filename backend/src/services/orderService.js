@@ -121,5 +121,39 @@ export function toDashboardView(order) {
     tracking: order.tracking,
     history: order.history,
     updatedAt: order.updatedAt,
+    createdAt: order.createdAt,
+    program: order.intake?.program || null,
+    needsPmCapture: Boolean(order.needsPmCapture),
   };
+}
+
+/**
+ * Return all orders owned by a patient (newest first). Used by the
+ * /api/orders/me endpoint that powers the dashboard.
+ */
+export function listOrdersByPatient(patientId) {
+  if (!patientId) return [];
+  const out = [];
+  for (const order of store.values()) {
+    if (order.intake?.patientId === patientId) out.push(order);
+  }
+  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return out.map(toDashboardView);
+}
+
+/**
+ * Mark an order as needing a payment-method capture later. Used when an
+ * intake submits successfully but no Stripe publishable key is configured
+ * locally (dev mode), so the SetupIntent step is deferred.
+ */
+export function markNeedsPmCapture(orderId, value = true) {
+  const order = getOrder(orderId);
+  order.needsPmCapture = Boolean(value);
+  order.updatedAt = new Date().toISOString();
+  return order;
+}
+
+// Test-only: reset the store between runs.
+export function __resetOrderStore() {
+  store.clear();
 }

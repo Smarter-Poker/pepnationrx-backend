@@ -435,8 +435,6 @@ curl localhost:3000/api/orders/<ORDER_ID>
 
 **Real (works today):**
 - Express server, routing, JSON parsing, error handling
-- Patient account / authentication layer (register, login, sessions, password
-  reset, route protection) — in-memory stores, marked TODO(prod)
 - Intake validation (zod schema)
 - Product catalog + conditional pharmacy router
 - Order model + lifecycle state machine with valid-transition enforcement
@@ -452,17 +450,13 @@ curl localhost:3000/api/orders/<ORDER_ID>
 - **Auth schemes** — Bearer tokens assumed; confirm per vendor.
 - **Webhook signature verification** — `verifySignature()` is a stub; real
   HMAC/timing-safe verification must replace it before production.
-- **Persistence** — `orderService` and `patientService` use in-memory `Map`s,
-  and the session store is in-memory. Replace with a HIPAA-eligible database
-  (`DATABASE_URL`) and a shared session store.
-- **Email** — verification / password-reset email send is stubbed
-  (`sendEmailStub` logs only); integrate a HIPAA-eligible email provider.
+- **Persistence** — `orderService` uses an in-memory `Map`. Replace with a
+  real database (`DATABASE_URL`).
 - **Payments** — fully wired (capture-now / charge-on-approval; see the
   **Payments (Stripe)** section). Runs against an in-process Stripe mock until
   a real `STRIPE_SECRET_KEY` is supplied — no real Stripe account exists yet.
 
-Search the codebase for `TODO(onboarding)` and `TODO(prod)` to find every
-reconciliation point.
+Search the codebase for `TODO(onboarding)` to find every reconciliation point.
 
 ---
 

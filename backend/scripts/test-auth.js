@@ -11,6 +11,11 @@
 //
 // No real network calls leave the process; vendor clients are stubbed and the
 // stores are in-memory.
+//
+// Force NODE_ENV=production BEFORE importing the app so cookie posture
+// reflects the prod settings (SameSite=Strict). In dev mode the cookie is
+// Lax to make localhost flows work smoothly without weakening prod.
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 import { app } from '../src/server.js';
 
 function hr(label) {

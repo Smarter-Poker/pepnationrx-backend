@@ -7,12 +7,12 @@
 // It submits three sample intakes through the real orchestrator path
 // (validate -> red-flag screen -> build SteadyMD payload -> submit async visit
 // stub):
-//   1. Weight management - female patient (exercises the pregnancy-screening
+//   1. Weight management — female patient (exercises the pregnancy-screening
 //      branch that only shows for female sex at birth).
-//   2. TRT - male patient (exercises the TRT condition-specific branch; the
+//   2. TRT — male patient (exercises the TRT condition-specific branch; the
 //      pregnancy step is correctly skipped).
-//   3. Weight management - female patient who IS pregnant (exercises the
-//      red-flag / contraindication gate - declined before reaching a clinician).
+//   3. Weight management — female patient who IS pregnant (exercises the
+//      red-flag / contraindication gate — declined before reaching a clinician).
 //
 // No real network calls are made; steadymdClient is stubbed.
 
@@ -44,19 +44,19 @@ function show(payloadResult) {
     console.log('\n--- SteadyMD async-visit payload ---');
     console.log(JSON.stringify(steadymdPayload, null, 2));
   } else {
-    console.log('\n(no SteadyMD payload - intake was ineligible and declined)');
+    console.log('\n(no SteadyMD payload — intake was ineligible and declined)');
   }
 }
 
 async function main() {
-  hr(`Questionnaire definition - v${questionnaire.version}, ${questionnaire.totalSteps} steps`);
+  hr(`Questionnaire definition — v${questionnaire.version}, ${questionnaire.totalSteps} steps`);
   for (const step of questionnaire.steps) {
     const branch = step.showIf ? '  [conditional]' : '';
     console.log(`  ${String(step.order).padStart(2)}. ${step.title}${branch}`);
   }
 
   // --- Case 1: Weight management, female (pregnancy branch active) ---------
-  hr('CASE 1 - Weight management, FEMALE patient (pregnancy branch shown)');
+  hr('CASE 1 — Weight management, FEMALE patient (pregnancy branch shown)');
   const case1 = await handleIntakeV2({
     patient: {
       firstName: 'Jane',
@@ -110,7 +110,7 @@ async function main() {
   show(case1);
 
   // --- Case 2: TRT, male (pregnancy branch correctly skipped) --------------
-  hr('CASE 2 - TRT, MALE patient (pregnancy branch skipped, TRT branch shown)');
+  hr('CASE 2 — TRT, MALE patient (pregnancy branch skipped, TRT branch shown)');
   const case2 = await handleIntakeV2({
     patient: {
       firstName: 'John',
@@ -158,7 +158,7 @@ async function main() {
   show(case2);
 
   // --- Case 3: Weight management, pregnant (red-flag gate) -----------------
-  hr('CASE 3 - Weight management, FEMALE + PREGNANT (red-flag: declined)');
+  hr('CASE 3 — Weight management, FEMALE + PREGNANT (red-flag: declined)');
   const case3 = await handleIntakeV2({
     patient: {
       firstName: 'Mary',

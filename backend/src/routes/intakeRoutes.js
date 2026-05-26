@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { questionnaire } from '../intake/questionnaire.js';
 import { allProductsExist } from '../data/catalog.js';
 import { handleIntakeV2 } from '../services/orchestrator.js';
-import { toDashboardView } from '../services/orderService.js';
+import { toDashboardView, markNeedsPmCapture } from '../services/orderService.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { attachPatient } from '../middleware/requireAuth.js';
 import { capturePaymentMethod } from '../services/stripeService.js';

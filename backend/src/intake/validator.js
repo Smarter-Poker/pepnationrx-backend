@@ -69,7 +69,7 @@ export function deriveProgram(productIds) {
   const list = [...programs];
   if (list.length > 1) {
     warnings.push(
-      `Selected products span multiple programs (${list.join(', ')}); using \"${list[0]}\".`,
+      `Selected products span multiple programs (${list.join(', ')}); using "${list[0]}".`,
     );
   }
   return { program: list[0] || null, warnings };
@@ -95,7 +95,7 @@ function validateAnswerValue(question, value) {
       }
       const allowed = new Set((question.options || []).map((o) => o.value));
       for (const item of value) {
-        if (!allowed.has(item)) errors.push(`\"${item}\" is not a valid option`);
+        if (!allowed.has(item)) errors.push(`"${item}" is not a valid option`);
       }
       break;
     }
@@ -141,14 +141,14 @@ function validateAnswerValue(question, value) {
       // file lives in object storage; this module only checks a ref exists.
       // TODO(steadymd-onboarding): reconcile with real API docs — confirm how
       // SteadyMD expects Intake Files to be referenced/uploaded (the EMR
-      // \"Attach Intake Files\" flow) and validate the ref against storage.
+      // "Attach Intake Files" flow) and validate the ref against storage.
       if (typeof value !== 'string' || value.length === 0) {
         errors.push('must be an uploaded-file reference id');
       }
       break;
     }
     default:
-      errors.push(`unknown question type \"${question.type}\"`);
+      errors.push(`unknown question type "${question.type}"`);
   }
   return errors;
 }
@@ -223,7 +223,7 @@ export function validateIntakeAnswers(submission) {
         // back-navigation); warn but do not hard-fail.
         if (hasValue(answers[question.id])) {
           warnings.push(
-            `Answer for hidden question \"${question.id}\" was ignored.`,
+            `Answer for hidden question "${question.id}" was ignored.`,
           );
         }
         continue;
@@ -236,7 +236,7 @@ export function validateIntakeAnswers(submission) {
         if (question.required) {
           issues.push({
             path: `answers.${question.id}`,
-            message: `\"${question.prompt}\" is required.`,
+            message: `"${question.prompt}" is required.`,
           });
         }
         continue; // nothing more to validate for an absent optional answer
@@ -253,7 +253,7 @@ export function validateIntakeAnswers(submission) {
     if (!QUESTION_BY_ID[qid]) {
       issues.push({
         path: `answers.${qid}`,
-        message: `Unknown question id \"${qid}\" — not part of the questionnaire.`,
+        message: `Unknown question id "${qid}" — not part of the questionnaire.`,
       });
     }
   }

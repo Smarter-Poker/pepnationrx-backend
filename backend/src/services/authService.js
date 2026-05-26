@@ -216,12 +216,17 @@ export function unsignSessionValue(cookieValue) {
   return sessionId;
 }
 
-/** Standard cookie options — httpOnly, Secure, SameSite=Strict. */
+/** Standard cookie options — httpOnly, Secure, SameSite=Strict in prod.
+ * In development (NODE_ENV !== 'production') we relax to SameSite=Lax so the
+ * dev server reached from a local-typed URL on a fresh tab still receives
+ * the cookie. Prod keeps Strict — this never weakens the production posture.
+ */
 export function sessionCookieOptions() {
+  const isProd = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true, // not readable by JS — mitigates XSS token theft
     secure: config.auth.cookieSecure, // HTTPS-only in production
-    sameSite: 'strict', // mitigates CSRF
+    sameSite: isProd ? 'strict' : 'lax', // strict in prod; lax in dev for smooth localhost UX
     path: '/',
     maxAge: config.auth.absoluteTimeoutMs,
   };
